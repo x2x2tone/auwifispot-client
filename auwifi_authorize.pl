@@ -15,6 +15,7 @@ use Web::Scraper;
 
 my $au_one_id;
 my $au_one_pw;
+my $au_captcha;
 my $mac_address;
 GetOptions("i|id=s" => \$au_one_id, "p|password=s" => \$au_one_pw, "m|macaddress=s" => \$mac_address) or pod2usage(2);
 pod2usage(1) unless $au_one_id && $au_one_pw && $mac_address;
@@ -40,24 +41,48 @@ my $request = {
 };
 my $json = to_json($request);
 
+################################
+# post to signup URL 
+################################
 my $response = $ua->post($signup_url, Content => $json);
 unless($response->is_success) {
   warn $response->as_string;
   die $response->status_line;
 }
 
+
 # scraping
 my $scraper = scraper {
   process 'form', 'action' => '@action';
   process 'input', "params[]" => { name => '@name', value => '@value' };
+  process '#validate_img', "validate_img" => '@src';
 };
 my $res = $scraper->scrape($response);
 my $login_url = $res->{action};
+
+printf "debug---login_url\n%s\n\n", $login_url;  #debug
+my $validate_img = $res->{validate_img};
+printf "debug---validate_img\n%s\n\n", $validate_img;  #debug
+
+chomp($au_captcha = <STDIN>);
+
 my %login_params;
 $login_params{$_->{name}} = $_->{value} for @{$res->{params}};
 $login_params{loginAliasId} = $au_one_id;
 $login_params{loginAuonePwd} = $au_one_pw;
+$login_params{captCha} = $au_captcha;
 
+# display hash --- debug code
+print "debug---login_params\n";
+foreach(keys(%login_params)) {
+	my $value = $login_params{$_};
+	print "$_ = $value\n"
+}
+print "\n";
+
+################################
+# post login information
+################################
 my $login_response = $ua->post($login_url, \%login_params);
 unless($login_response->is_success) {
   warn $response->as_string;
@@ -65,6 +90,7 @@ unless($login_response->is_success) {
 }
 my $content = $login_response->decoded_content;
 my $obj = eval { from_json($content) };
+printf "debug---result eval\n%s\n\n", $@;  #debug
 if($@) {
   my $errors = scraper {
     process '#errorMessage p', "error" => 'TEXT';
